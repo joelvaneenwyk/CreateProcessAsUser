@@ -1,8 +1,14 @@
 ﻿using System;
+using System.ComponentModel;
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;
+using JetBrains.Annotations;
 
-namespace murrayju.ProcessExtensions
+namespace ProcessExtensions
 {
+    [SuppressMessage("ReSharper", "InconsistentNaming")]
+    [SuppressMessage("ReSharper", "IdentifierTypo")]
+    [SuppressMessage("ReSharper", "StringLiteralTypo")]
     public static class ProcessExtensions
     {
         #region Win32 Constants
@@ -22,14 +28,14 @@ namespace murrayju.ProcessExtensions
         [DllImport("advapi32.dll", EntryPoint = "CreateProcessAsUser", SetLastError = true, CharSet = CharSet.Ansi, CallingConvention = CallingConvention.StdCall)]
         private static extern bool CreateProcessAsUser(
             IntPtr hToken,
-            String lpApplicationName,
-            String lpCommandLine,
+            string lpApplicationName,
+            string lpCommandLine,
             IntPtr lpProcessAttributes,
             IntPtr lpThreadAttributes,
             bool bInheritHandle,
             uint dwCreationFlags,
             IntPtr lpEnvironment,
-            String lpCurrentDirectory,
+            string lpCurrentDirectory,
             ref STARTUPINFO lpStartupInfo,
             out PROCESS_INFORMATION lpProcessInformation);
 
@@ -70,6 +76,7 @@ namespace murrayju.ProcessExtensions
 
         #region Win32 Structs
 
+        [PublicAPI]
         private enum SW
         {
             SW_HIDE = 0,
@@ -88,6 +95,7 @@ namespace murrayju.ProcessExtensions
             SW_MAX = 10
         }
 
+        [PublicAPI]
         private enum WTS_CONNECTSTATE_CLASS
         {
             WTSActive,
@@ -103,6 +111,7 @@ namespace murrayju.ProcessExtensions
         }
 
         [StructLayout(LayoutKind.Sequential)]
+        [PublicAPI]
         private struct PROCESS_INFORMATION
         {
             public IntPtr hProcess;
@@ -120,12 +129,13 @@ namespace murrayju.ProcessExtensions
         }
 
         [StructLayout(LayoutKind.Sequential)]
+        [PublicAPI]
         private struct STARTUPINFO
         {
             public int cb;
-            public String lpReserved;
-            public String lpDesktop;
-            public String lpTitle;
+            public string lpReserved;
+            public string lpDesktop;
+            public string lpTitle;
             public uint dwX;
             public uint dwY;
             public uint dwXSize;
@@ -142,6 +152,7 @@ namespace murrayju.ProcessExtensions
             public IntPtr hStdError;
         }
 
+        [PublicAPI]
         private enum TOKEN_TYPE
         {
             TokenPrimary = 1,
@@ -151,10 +162,10 @@ namespace murrayju.ProcessExtensions
         [StructLayout(LayoutKind.Sequential)]
         private struct WTS_SESSION_INFO
         {
-            public readonly UInt32 SessionID;
+            public readonly uint SessionID;
 
             [MarshalAs(UnmanagedType.LPStr)]
-            public readonly String pWinStationName;
+            public readonly string pWinStationName;
 
             public readonly WTS_CONNECTSTATE_CLASS State;
         }
@@ -178,7 +189,7 @@ namespace murrayju.ProcessExtensions
 
                 for (var i = 0; i < sessionCount; i++)
                 {
-                    var si = (WTS_SESSION_INFO)Marshal.PtrToStructure((IntPtr)current, typeof(WTS_SESSION_INFO));
+                    var si = (WTS_SESSION_INFO)Marshal.PtrToStructure(current, typeof(WTS_SESSION_INFO));
                     current += arrayElementSize;
 
                     if (si.State == WTS_CONNECTSTATE_CLASS.WTSActive)
@@ -207,13 +218,13 @@ namespace murrayju.ProcessExtensions
             return bResult;
         }
 
-        public static bool StartProcessAsCurrentUser(string appPath, string cmdLine = null, string workDir = null, bool visible = true)
+        public static int StartProcessAsCurrentUser(string appPath, string cmdLine = null, string workDir = null, bool visible = true)
         {
             var hUserToken = IntPtr.Zero;
             var startInfo = new STARTUPINFO();
             var procInfo = new PROCESS_INFORMATION();
             var pEnv = IntPtr.Zero;
-            int iResultOfCreateProcessAsUser;
+            int iResultOfCreateProcessAsUser = 1;
 
             startInfo.cb = Marshal.SizeOf(typeof(STARTUPINFO));
 
@@ -221,7 +232,7 @@ namespace murrayju.ProcessExtensions
             {
                 if (!GetSessionUserToken(ref hUserToken))
                 {
-                    throw new Exception("StartProcessAsCurrentUser: GetSessionUserToken failed.");
+                    throw new Win32Exception("StartProcessAsCurrentUser: GetSessionUserToken failed.");
                 }
 
                 uint dwCreationFlags = CREATE_UNICODE_ENVIRONMENT | (uint)(visible ? CREATE_NEW_CONSOLE : CREATE_NO_WINDOW);
@@ -230,23 +241,23 @@ namespace murrayju.ProcessExtensions
 
                 if (!CreateEnvironmentBlock(ref pEnv, hUserToken, false))
                 {
-                    throw new Exception("StartProcessAsCurrentUser: CreateEnvironmentBlock failed.");
+                    throw new Win32Exception("StartProcessAsCurrentUser: CreateEnvironmentBlock failed.");
                 }
 
                 if (!CreateProcessAsUser(hUserToken,
-                    appPath, // Application Name
-                    cmdLine, // Command Line
-                    IntPtr.Zero,
-                    IntPtr.Zero,
-                    false,
-                    dwCreationFlags,
-                    pEnv,
-                    workDir, // Working directory
-                    ref startInfo,
-                    out procInfo))
+                        appPath, // Application Name
+                        cmdLine, // Command Line
+                        IntPtr.Zero,
+                        IntPtr.Zero,
+                        false,
+                        dwCreationFlags,
+                        pEnv,
+                        workDir, // Working directory
+                        ref startInfo,
+                        out procInfo))
                 {
                     iResultOfCreateProcessAsUser = Marshal.GetLastWin32Error();
-                    throw new Exception("StartProcessAsCurrentUser: CreateProcessAsUser failed.  Error Code -" + iResultOfCreateProcessAsUser);
+                    throw new Win32Exception("StartProcessAsCurrentUser: CreateProcessAsUser failed.  Error Code -" + iResultOfCreateProcessAsUser);
                 }
 
                 iResultOfCreateProcessAsUser = Marshal.GetLastWin32Error();
@@ -262,7 +273,7 @@ namespace murrayju.ProcessExtensions
                 CloseHandle(procInfo.hProcess);
             }
 
-            return true;
+            return iResultOfCreateProcessAsUser;
         }
 
     }

@@ -1,7 +1,6 @@
-﻿using murrayju.ProcessExtensions;
-using System.ServiceProcess;
+﻿using System.ServiceProcess;
 
-namespace demo
+namespace DemoService
 {
     public partial class DemoService : ServiceBase
     {
@@ -12,11 +11,12 @@ namespace demo
 
         protected override void OnStart(string[] args)
         {
-            ProcessExtensions.StartProcessAsCurrentUser("calc.exe");
+            ProcessExtensions.ProcessExtensions.StartProcessAsCurrentUser("calc.exe");
         }
 
         protected override void OnStop()
         {
+            // No need to do anything special here so leaving blank intentionally.
         }
     }
 }

@@ -2,3 +2,6 @@ obj/
 solution.sln.ide/
 bin/
 *.InstallLog
+.vs/
+.idea/
+packages/
