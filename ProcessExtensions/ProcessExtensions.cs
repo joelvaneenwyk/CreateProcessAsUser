@@ -9,10 +9,9 @@ namespace ProcessExtensions
     [SuppressMessage("ReSharper", "InconsistentNaming")]
     [SuppressMessage("ReSharper", "IdentifierTypo")]
     [SuppressMessage("ReSharper", "StringLiteralTypo")]
+    [SuppressMessage("CodeQuality", "IDE0079:Remove unnecessary suppression", Justification = "<Pending>")]
     public static class ProcessExtensions
     {
-        #region Win32 Constants
-
         private const int CREATE_UNICODE_ENVIRONMENT = 0x00000400;
         private const int CREATE_NO_WINDOW = 0x08000000;
 
@@ -21,11 +20,106 @@ namespace ProcessExtensions
         private const uint INVALID_SESSION_ID = 0xFFFFFFFF;
         private static readonly IntPtr WTS_CURRENT_SERVER_HANDLE = IntPtr.Zero;
 
-        #endregion
+        /// <summary>
+        ///     Gets the user token from the currently active session.
+        /// </summary>
+        /// <param name="phUserToken"></param>
+        /// <returns></returns>
+        private static bool GetSessionUserToken(ref IntPtr phUserToken)
+        {
+            bool bResult = false;
+            var hImpersonationToken = IntPtr.Zero;
+            uint activeSessionId = INVALID_SESSION_ID;
+            var pSessionInfo = IntPtr.Zero;
+            int sessionCount = 0;
 
-        #region DllImports
+            // Get a handle to the user access token for the current active session.
+            if (WTSEnumerateSessions(WTS_CURRENT_SERVER_HANDLE, 0, 1, ref pSessionInfo, ref sessionCount) != 0)
+            {
+                int arrayElementSize = Marshal.SizeOf(typeof(WTS_SESSION_INFO));
+                var current = pSessionInfo;
 
-        [DllImport("advapi32.dll", EntryPoint = "CreateProcessAsUser", SetLastError = true, CharSet = CharSet.Ansi, CallingConvention = CallingConvention.StdCall)]
+                for (int i = 0; i < sessionCount; i++)
+                {
+                    var si = (WTS_SESSION_INFO)Marshal.PtrToStructure(current, typeof(WTS_SESSION_INFO));
+                    current += arrayElementSize;
+
+                    if (si.State == WTS_CONNECTSTATE_CLASS.WTSActive) activeSessionId = si.SessionID;
+                }
+            }
+
+            // If enumerating did not work, fall back to the old method
+            if (activeSessionId == INVALID_SESSION_ID) activeSessionId = WTSGetActiveConsoleSessionId();
+
+            if (WTSQueryUserToken(activeSessionId, ref hImpersonationToken) != 0)
+            {
+                // Convert the impersonation token to a primary token
+                bResult = DuplicateTokenEx(hImpersonationToken, 0, IntPtr.Zero,
+                    (int)SECURITY_IMPERSONATION_LEVEL.SecurityImpersonation, (int)TOKEN_TYPE.TokenPrimary,
+                    ref phUserToken);
+
+                CloseHandle(hImpersonationToken);
+            }
+
+            return bResult;
+        }
+
+        public static int StartProcessAsCurrentUser(
+            string appPath, string cmdLine = null, string workDir = null, bool visible = true)
+        {
+            var hUserToken = IntPtr.Zero;
+            var startInfo = new STARTUPINFO();
+            var procInfo = new PROCESS_INFORMATION();
+            var pEnv = IntPtr.Zero;
+            int iResultOfCreateProcessAsUser;
+
+            startInfo.cb = Marshal.SizeOf(typeof(STARTUPINFO));
+
+            try
+            {
+                if (!GetSessionUserToken(ref hUserToken))
+                    throw new Win32Exception("StartProcessAsCurrentUser: GetSessionUserToken failed.");
+
+                uint dwCreationFlags = CREATE_UNICODE_ENVIRONMENT | (uint)(visible ? CREATE_NEW_CONSOLE : CREATE_NO_WINDOW);
+                startInfo.wShowWindow = (short)(visible ? SW.SW_SHOW : SW.SW_HIDE);
+                startInfo.lpDesktop = "winsta0\\default";
+
+                if (!CreateEnvironmentBlock(ref pEnv, hUserToken, false))
+                    throw new Win32Exception("StartProcessAsCurrentUser: CreateEnvironmentBlock failed.");
+
+                if (!CreateProcessAsUser(hUserToken,
+                        appPath, // Application Name
+                        cmdLine, // Command Line
+                        IntPtr.Zero,
+                        IntPtr.Zero,
+                        false,
+                        dwCreationFlags,
+                        pEnv,
+                        workDir, // Working directory
+                        ref startInfo,
+                        out procInfo))
+                {
+                    iResultOfCreateProcessAsUser = Marshal.GetLastWin32Error();
+                    throw new Win32Exception("StartProcessAsCurrentUser: CreateProcessAsUser failed.  Error Code -" +
+                                             iResultOfCreateProcessAsUser);
+                }
+
+                iResultOfCreateProcessAsUser = Marshal.GetLastWin32Error();
+            }
+            finally
+            {
+                CloseHandle(hUserToken);
+                if (pEnv != IntPtr.Zero) DestroyEnvironmentBlock(pEnv);
+                CloseHandle(procInfo.hThread);
+                CloseHandle(procInfo.hProcess);
+            }
+
+            return iResultOfCreateProcessAsUser;
+        }
+
+        [DllImport(
+            "advapi32.dll", EntryPoint = "CreateProcessAsUser",
+            SetLastError = true, CharSet = CharSet.Ansi, CallingConvention = CallingConvention.StdCall)]
         private static extern bool CreateProcessAsUser(
             IntPtr hToken,
             string lpApplicationName,
@@ -72,10 +166,6 @@ namespace ProcessExtensions
             ref IntPtr ppSessionInfo,
             ref int pCount);
 
-        #endregion
-
-        #region Win32 Structs
-
         [PublicAPI]
         private enum SW
         {
@@ -120,12 +210,13 @@ namespace ProcessExtensions
             public uint dwThreadId;
         }
 
+        [PublicAPI]
         private enum SECURITY_IMPERSONATION_LEVEL
         {
             SecurityAnonymous = 0,
             SecurityIdentification = 1,
             SecurityImpersonation = 2,
-            SecurityDelegation = 3,
+            SecurityDelegation = 3
         }
 
         [StructLayout(LayoutKind.Sequential)]
@@ -160,121 +251,14 @@ namespace ProcessExtensions
         }
 
         [StructLayout(LayoutKind.Sequential)]
+        [PublicAPI]
         private struct WTS_SESSION_INFO
         {
             public readonly uint SessionID;
 
-            [MarshalAs(UnmanagedType.LPStr)]
-            public readonly string pWinStationName;
+            [MarshalAs(UnmanagedType.LPStr)] public readonly string pWinStationName;
 
             public readonly WTS_CONNECTSTATE_CLASS State;
         }
-
-        #endregion
-
-        // Gets the user token from the currently active session
-        private static bool GetSessionUserToken(ref IntPtr phUserToken)
-        {
-            var bResult = false;
-            var hImpersonationToken = IntPtr.Zero;
-            var activeSessionId = INVALID_SESSION_ID;
-            var pSessionInfo = IntPtr.Zero;
-            var sessionCount = 0;
-
-            // Get a handle to the user access token for the current active session.
-            if (WTSEnumerateSessions(WTS_CURRENT_SERVER_HANDLE, 0, 1, ref pSessionInfo, ref sessionCount) != 0)
-            {
-                var arrayElementSize = Marshal.SizeOf(typeof(WTS_SESSION_INFO));
-                var current = pSessionInfo;
-
-                for (var i = 0; i < sessionCount; i++)
-                {
-                    var si = (WTS_SESSION_INFO)Marshal.PtrToStructure(current, typeof(WTS_SESSION_INFO));
-                    current += arrayElementSize;
-
-                    if (si.State == WTS_CONNECTSTATE_CLASS.WTSActive)
-                    {
-                        activeSessionId = si.SessionID;
-                    }
-                }
-            }
-
-            // If enumerating did not work, fall back to the old method
-            if (activeSessionId == INVALID_SESSION_ID)
-            {
-                activeSessionId = WTSGetActiveConsoleSessionId();
-            }
-
-            if (WTSQueryUserToken(activeSessionId, ref hImpersonationToken) != 0)
-            {
-                // Convert the impersonation token to a primary token
-                bResult = DuplicateTokenEx(hImpersonationToken, 0, IntPtr.Zero,
-                    (int)SECURITY_IMPERSONATION_LEVEL.SecurityImpersonation, (int)TOKEN_TYPE.TokenPrimary,
-                    ref phUserToken);
-
-                CloseHandle(hImpersonationToken);
-            }
-
-            return bResult;
-        }
-
-        public static int StartProcessAsCurrentUser(string appPath, string cmdLine = null, string workDir = null, bool visible = true)
-        {
-            var hUserToken = IntPtr.Zero;
-            var startInfo = new STARTUPINFO();
-            var procInfo = new PROCESS_INFORMATION();
-            var pEnv = IntPtr.Zero;
-            int iResultOfCreateProcessAsUser = 1;
-
-            startInfo.cb = Marshal.SizeOf(typeof(STARTUPINFO));
-
-            try
-            {
-                if (!GetSessionUserToken(ref hUserToken))
-                {
-                    throw new Win32Exception("StartProcessAsCurrentUser: GetSessionUserToken failed.");
-                }
-
-                uint dwCreationFlags = CREATE_UNICODE_ENVIRONMENT | (uint)(visible ? CREATE_NEW_CONSOLE : CREATE_NO_WINDOW);
-                startInfo.wShowWindow = (short)(visible ? SW.SW_SHOW : SW.SW_HIDE);
-                startInfo.lpDesktop = "winsta0\\default";
-
-                if (!CreateEnvironmentBlock(ref pEnv, hUserToken, false))
-                {
-                    throw new Win32Exception("StartProcessAsCurrentUser: CreateEnvironmentBlock failed.");
-                }
-
-                if (!CreateProcessAsUser(hUserToken,
-                        appPath, // Application Name
-                        cmdLine, // Command Line
-                        IntPtr.Zero,
-                        IntPtr.Zero,
-                        false,
-                        dwCreationFlags,
-                        pEnv,
-                        workDir, // Working directory
-                        ref startInfo,
-                        out procInfo))
-                {
-                    iResultOfCreateProcessAsUser = Marshal.GetLastWin32Error();
-                    throw new Win32Exception("StartProcessAsCurrentUser: CreateProcessAsUser failed.  Error Code -" + iResultOfCreateProcessAsUser);
-                }
-
-                iResultOfCreateProcessAsUser = Marshal.GetLastWin32Error();
-            }
-            finally
-            {
-                CloseHandle(hUserToken);
-                if (pEnv != IntPtr.Zero)
-                {
-                    DestroyEnvironmentBlock(pEnv);
-                }
-                CloseHandle(procInfo.hThread);
-                CloseHandle(procInfo.hProcess);
-            }
-
-            return iResultOfCreateProcessAsUser;
-        }
-
     }
 }

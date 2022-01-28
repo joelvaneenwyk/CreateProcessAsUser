@@ -11,11 +11,15 @@ This allows a process running in a different session (such as a windows service)
 Note that the process must have the appropriate (admin) privileges for this to work correctly.
 
 ## Usage
+
 ```C#
-using murrayju.ProcessExtensions;
+using ProcessExtensions;
 // ...
 ProcessExtensions.StartProcessAsCurrentUser("calc.exe");
 ```
 
 ### Parameters
-The second argument is used to pass the command line arguments as a string. Depending on the target application, `argv[0]` might be expected to be the executable name, or it might be the first parameter. See [this stack overflow answer](https://stackoverflow.com/a/14001282) for details. When in doubt, try it both ways.
+
+The second argument is used to pass the command line arguments as a string. Depending on the target
+application, `argv[0]` might be expected to be the executable name, or it might be the first parameter.
+See [this stack overflow answer](https://stackoverflow.com/a/14001282) for details. When in doubt, try it both ways.
