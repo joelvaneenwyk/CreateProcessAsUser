@@ -7,7 +7,7 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DemoService", "DemoService\
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ProcessExtensions", "ProcessExtensions\ProcessExtensions.csproj", "{770A3D71-31C3-46AE-97AD-A0325D8462FB}"
 EndProject
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{CBE27F9B-9C17-4A66-B7D0-9DDEEF10138E}"
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = ".Global", ".Global", "{CBE27F9B-9C17-4A66-B7D0-9DDEEF10138E}"
 	ProjectSection(SolutionItems) = preProject
 		README.md = README.md
 		.gitignore = .gitignore
